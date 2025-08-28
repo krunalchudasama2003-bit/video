@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Video Gallery (Fixed)</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Arial,sans-serif;background:#0f172a;color:#e2e8f0}
+  header{background:#0b1220;padding:12px 20px;display:flex;justify-content:space-between;align-items:center}
+  header h1{margin:0;font-size:20px}
+  header a, header button, header span{color:#93c5fd;margin-left:12px;text-decoration:none;background:none;border:none;cursor:pointer;font-size:14px}
+  header a:hover, header button:hover{text-decoration:underline}
+  .container{max-width:1000px;margin:20px auto;padding:0 20px}
+  .btn{background:#2563eb;color:white;padding:6px 10px;border-radius:6px;text-decoration:none;cursor:pointer;border:none;font-size:14px}
+  .btn:hover{opacity:.9}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+  .card{background:#111827;border:1px solid #1f2937;border-radius:12px;overflow:hidden;position:relative}
+  .card video{width:100%;height:160px;object-fit:cover;background:#000}
+  .card-body{padding:10px}
+  .card-body h3{margin:0;font-size:16px}
+  .card-body p{margin:6px 0 0;font-size:13px;color:#9ca3af}
+  .meta{display:flex;gap:8px;margin-top:8px;font-size:13px;color:#93c5fd;align-items:center}
+  .delete-btn{position:absolute;top:8px;right:8px;background:#dc2626;border:none;color:white;padding:4px 8px;font-size:12px;border-radius:6px;cursor:pointer}
+  .delete-btn:hover{background:#b91c1c}
+  .form{display:grid;gap:12px;max-width:700px;margin:20px auto}
+  .form input,.form textarea{padding:10px;border-radius:8px;border:1px solid #374151;background:#0b1220;color:#e5e7eb}
+  .video-page{max-width:900px;margin:20px auto}
+  .video-page video{width:100%;max-height:65vh;background:#000;border-radius:12px;border:1px solid #1f2937}
+  .actions{margin-top:10px;display:flex;gap:10px;flex-wrap:wrap}
+  .actions button{background:#1e293b;color:#e2e8f0;border:none;padding:6px 10px;border-radius:6px;cursor:pointer}
+  .actions button:hover{background:#334155}
+  .comments{margin-top:16px}
+  .comment-box{display:flex;gap:8px;margin-top:8px}
+  .comment-box input{flex:1;padding:8px;border-radius:6px;border:1px solid #374151;background:#0b1220;color:#e2e8f0}
+  .comment-list{margin-top:10px;padding-left:0;list-style:none}
+  .comment-list li{padding:8px;background:#1e293b;margin-bottom:6px;border-radius:6px;font-size:14px}
+  footer{border-top:1px solid #1f2937;margin-top:30px;text-align:center;padding:12px;color:#94a3b8}
+  .webcam{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .webcam video{width:100%;max-width:640px;border:2px solid #374151;border-radius:10px;background:#000}
+  .flash{background:#065f46;padding:8px;border-radius:8px;margin:10px auto;max-width:700px;text-align:center}
+  .small{font-size:12px;color:#9ca3af}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 Video Gallery</h1>
+  <nav id="navLinks"></nav>
+</header>
+
+<main class="container" id="main"></main>
+
+<footer>&copy; 2025 Video Gallery — IndexedDB persistence</footer>
+
+<script>
+/* ---------------------------
+   Utilities & robust parsing
+   --------------------------- */
+const safeJsonParse = (s, fallback=null) => {
+  try { return JSON.parse(s); } catch(e) { return fallback; }
+};
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+
+/* ---------------------------
+   IndexedDB wrapper for videos
+   --------------------------- */
+const DB_NAME = 'videoGalleryDB_v1';
+const STORE = 'videos';
+let dbPromise = null;
+
+function openDb(){
+  if(dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        const os = db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+        os.createIndex('createdAt', 'createdAt');
+        os.createIndex('owner', 'owner');
+      }
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+  return dbPromise;
+}
+
+async function dbAddVideo(videoObj){
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const r = store.add(videoObj);
+    r.onsuccess = ()=> res(r.result);
+    r.onerror = ()=> rej(r.error);
+  });
+}
+
+async function dbGetAll(){
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const store = tx.objectStore(STORE);
+    const r = store.getAll();
+    r.onsuccess = ()=> res(r.result);
+    r.onerror = ()=> rej(r.error);
+  });
+}
+
+async function dbGet(id){
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const store = tx.objectStore(STORE);
+    const r = store.get(Number(id));
+    r.onsuccess = ()=> res(r.result);
+    r.onerror = ()=> rej(r.error);
+  });
+}
+
+async function dbPut(obj){
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const r = store.put(obj);
+    r.onsuccess = ()=> res(r.result);
+    r.onerror = ()=> rej(r.error);
+  });
+}
+
+async function dbDelete(id){
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const r = store.delete(Number(id));
+    r.onsuccess = ()=> res();
+    r.onerror = ()=> rej(r.error);
+  });
+}
+
+/* ---------------------------
+   User data (localStorage)
+   - robust migration from older formats
+   --------------------------- */
+let users = safeJsonParse(localStorage.getItem('users'), []) || [];
+// Normalize old user formats (user/pass) -> {username,password}
+users = users.map(u => {
+  if (u && u.user !== undefined && u.pass !== undefined) return { username: String(u.user), password: String(u.pass) };
+  if (u && u.username !== undefined && u.password !== undefined) return { username: String(u.username), password: String(u.password) };
+  return null;
+}).filter(Boolean);
+
+localStorage.setItem('users', JSON.stringify(users));
+
+// currentUser: support either a JSON stringified object, or legacy plain username string
+let rawCur = localStorage.getItem('currentUser');
+let currentUser = null;
+if (rawCur) {
+  // try parse
+  const parsed = safeJsonParse(rawCur, null);
+  if (parsed && parsed.username) currentUser = parsed;
+  else {
+    // maybe it was a plain username string from older versions
+    const uname = rawCur;
+    const found = users.find(u => u.username === uname);
+    if (found) currentUser = found;
+  }
+}
+
+/* ---------------------------
+   UI helpers
+   --------------------------- */
+function updateNav(){
+  const nav = document.getElementById('navLinks');
+  if (currentUser) {
+    nav.innerHTML = `
+      <span class="small">👤 ${escapeHtml(currentUser.username)}</span>
+      <a href="#" onclick="showGallery();return false">Home</a>
+      <a href="#" onclick="showUpload();return false">Upload</a>
+      <a href="#" onclick="showWebcam();return false">Webcam</a>
+      <button onclick="logout();return false">Logout</button>
+    `;
+  } else {
+    nav.innerHTML = `
+      <a href="#" onclick="showLogin();return false">Login</a>
+      <a href="#" onclick="showSignup();return false">Signup</a>
+    `;
+  }
+}
+
+function setCurrentUser(userObj){
+  currentUser = userObj ? { username: userObj.username } : null;
+  // keep only minimal info
+  if (userObj) localStorage.setItem('currentUser', JSON.stringify(currentUser));
+  else localStorage.removeItem('currentUser');
+  updateNav();
+}
+
+function escapeHtml(s = '') {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+function flash(msg){
+  const main = document.getElementById('main');
+  const el = document.createElement('div');
+  el.className = 'flash';
+  el.textContent = msg;
+  main.prepend(el);
+  setTimeout(()=> el.remove(), 2500);
+}
+
+/* ---------------------------
+   App logic: gallery, upload, view, likes, comments
+   --------------------------- */
+
+async function refreshGallery(){
+  if (!currentUser) return showLogin();
+  const main = document.getElementById('main');
+  main.innerHTML = '<h2>All Videos</h2><div id="grid" class="grid"></div>';
+  const grid = document.getElementById('grid');
+
+  // load videos from DB
+  let items = await dbGetAll();
+  // sort newest first
+  items.sort((a,b) => b.createdAt - a.createdAt);
+  if (items.length === 0) {
+    grid.innerHTML = '<p class="small">No videos yet. Upload or record one.</p>';
+    return;
+  }
+
+  // create card for each
+  items.forEach((v) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    // create video thumbnail (createObjectURL from blob)
+    const videoEl = document.createElement('video');
+    videoEl.preload = 'metadata';
+    videoEl.muted = true;
+    videoEl.src = URL.createObjectURL(v.blob);
+    videoEl.addEventListener('loadeddata', ()=> {
+      // nothing
+    });
+    videoEl.addEventListener('click', (e)=> { e.stopPropagation(); viewVideo(v.id); });
+
+    const body = document.createElement('div');
+    body.className = 'card-body';
+    body.innerHTML = `<h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.description||'')}</p>`;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<span>👍 ${v.likes||0}</span><span class="small">${(v.comments||[]).length} comments</span><span class="small">by ${escapeHtml(v.owner||'unknown')}</span>`;
+
+    body.appendChild(meta);
+    body.addEventListener('click', ()=> viewVideo(v.id));
+
+    // delete button (only owner can delete)
+    if (currentUser && currentUser.username === v.owner) {
+      const del = document.createElement('button');
+      del.className = 'delete-btn';
+      del.textContent = 'Delete';
+      del.addEventListener('click', (ev)=> { ev.stopPropagation(); deleteVideo(v.id); });
+      card.appendChild(del);
+    }
+
+    card.appendChild(videoEl);
+    card.appendChild(body);
+    grid.appendChild(card);
+  });
+}
+
+/* Upload form */
+function showUpload(){
+  if (!currentUser) return showLogin();
+  document.getElementById('main').innerHTML = `
+    <h2>Upload a Video</h2>
+    <form class="form" id="uploadForm">
+      <input type="text" id="title" placeholder="Title" required />
+      <textarea id="description" rows="3" placeholder="Description (optional)"></textarea>
+      <input type="file" id="file" accept="video/*" required />
+      <div style="display:flex;gap:8px">
+        <button class="btn" type="submit">Upload</button>
+        <button class="btn" type="button" onclick="showGallery();">Cancel</button>
+      </div>
+      <div class="small">Note: files are stored in your browser using IndexedDB — large videos are allowed but may use disk space.</div>
+    </form>
+  `;
+  document.getElementById('uploadForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const f = document.getElementById('file').files[0];
+    const title = document.getElementById('title').value.trim();
+    const desc = document.getElementById('description').value.trim();
+    if (!f) { flash('Choose a file'); return; }
+    const blob = f.slice(0, f.size, f.type);
+    const videoObj = { title, description: desc, owner: currentUser.username, blob, likes:0, comments:[], createdAt: Date.now() };
+    await dbAddVideo(videoObj);
+    flash('Uploaded');
+    refreshGallery();
+  });
+}
+
+/* View single video (by id) */
+async function viewVideo(id){
+  const v = await dbGet(id);
+  if (!v) { flash('Video not found'); return; }
+  // create objectURL for playback
+  const url = URL.createObjectURL(v.blob);
+  document.getElementById('main').innerHTML = `
+    <div class="video-page">
+      <h2>${escapeHtml(v.title)}</h2>
+      <video id="player" src="${url}" controls autoplay></video>
+      <p class="small">${escapeHtml(v.description||'')}</p>
+      <div class="actions">
+        <button id="likeBtn">👍 Like (${v.likes||0})</button>
+        <button id="playBtn">▶ Play</button>
+        <button id="shareBtn">🔗 Share</button>
+        ${currentUser && currentUser.username === v.owner ? `<button id="deleteBtn">🗑 Delete</button>` : ''}
+        <button id="backBtn">⬅ Back</button>
+      </div>
+
+      <div class="comments">
+        <h4>Comments</h4>
+        <div class="comment-box">
+          <input id="commentInput" placeholder="Add a comment" />
+          <button id="postComment" class="btn">Post</button>
+        </div>
+        <ul id="commentList" class="comment-list"></ul>
+      </div>
+    </div>
+  `;
+  const commentList = document.getElementById('commentList');
+  (v.comments||[]).forEach(c => {
+    const li = document.createElement('li');
+    li.textContent = `${c.user}: ${c.text}`;
+    commentList.appendChild(li);
+  });
+
+  document.getElementById('likeBtn').addEventListener('click', async ()=>{
+    v.likes = (v.likes||0)+1;
+    await dbPut(v);
+    viewVideo(id); // refresh view
+  });
+
+  document.getElementById('playBtn').addEventListener('click', ()=>{
+    document.getElementById('player').play();
+  });
+
+  document.getElementById('shareBtn').addEventListener('click', async ()=>{
+    // create a temporary blob URL and copy to clipboard
+    try {
+      await navigator.clipboard.writeText(url);
+      flash('Temporary video link copied to clipboard (valid for this session).');
+    } catch(e){
+      flash('Could not copy link: ' + (e.message||e));
+    }
+  });
+
+  const delBtn = document.getElementById('deleteBtn');
+  if (delBtn) delBtn.addEventListener('click', ()=> deleteVideo(id));
+
+  document.getElementById('backBtn').addEventListener('click', ()=> {
+    URL.revokeObjectURL(url);
+    refreshGallery();
+  });
+
+  document.getElementById('postComment').addEventListener('click', async ()=>{
+    const input = document.getElementById('commentInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const comment = { user: currentUser ? currentUser.username : 'guest', text, at: Date.now() };
+    v.comments = v.comments || [];
+    v.comments.push(comment);
+    await dbPut(v);
+    viewVideo(id);
+  });
+}
+
+/* Delete video */
+async function deleteVideo(id){
+  const v = await dbGet(id);
+  if (!v) { flash('Not found'); return; }
+  if (!currentUser || currentUser.username !== v.owner) { alert('Only the owner can delete this video'); return; }
+  if (!confirm('Delete this video permanently?')) return;
+  await dbDelete(id);
+  flash('Deleted');
+  refreshGallery();
+}
+
+/* Webcam recording */
+let mediaRecorder, recordedChunks;
+async function showWebcam(){
+  if (!currentUser) return showLogin();
+  document.getElementById('main').innerHTML = `
+    <h2>Record with Webcam</h2>
+    <div class="webcam">
+      <video id="webcamPreview" autoplay muted></video>
+      <div style="display:flex;gap:8px">
+        <button id="startBtn" class="btn">Start Recording</button>
+        <button id="stopBtn" class="btn" disabled>Stop</button>
+        <button id="cancelBtn" class="btn">Cancel</button>
+      </div>
+      <div class="small">After stopping you'll be prompted for a title.</div>
+    </div>
+  `;
+  const preview = document.getElementById('webcamPreview');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    preview.srcObject = stream;
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
+    mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const title = prompt('Enter title for recorded video:');
+      if (title) {
+        const videoObj = { title, description: 'Recorded with webcam', owner: currentUser.username, blob, likes:0, comments:[], createdAt: Date.now() };
+        await dbAddVideo(videoObj);
+        flash('Recording saved');
+        // stop tracks
+        stream.getTracks().forEach(t=>t.stop());
+        refreshGallery();
+      } else {
+        flash('Recording discarded (no title given)');
+        stream.getTracks().forEach(t=>t.stop());
+        showGallery();
+      }
+    };
+    document.getElementById('startBtn').onclick = () => { recordedChunks = []; mediaRecorder.start(); document.getElementById('startBtn').disabled = true; document.getElementById('stopBtn').disabled = false; };
+    document.getElementById('stopBtn').onclick = () => { mediaRecorder.stop(); document.getElementById('startBtn').disabled = false; document.getElementById('stopBtn').disabled = true; };
+    document.getElementById('cancelBtn').onclick = () => { stream.getTracks().forEach(t=>t.stop()); showGallery(); };
+  } catch(err) {
+    flash('Webcam access error: ' + err.message);
+    showGallery();
+  }
+}
+
+/* ---------------------------
+   Auth screens: login/signup/logout
+   --------------------------- */
+function showLogin(){
+  document.getElementById('main').innerHTML = `
+    <h2>Login</h2>
+    <form class="form" id="loginForm">
+      <input id="loginUser" placeholder="Username" required />
+      <input id="loginPass" type="password" placeholder="Password" required />
+      <div style="display:flex;gap:8px">
+        <button class="btn" type="submit">Login</button>
+        <button class="btn" type="button" onclick="showSignup();">Signup</button>
+      </div>
+    </form>
+  `;
+  document.getElementById('loginForm').addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const u = document.getElementById('loginUser').value.trim();
+    const p = document.getElementById('loginPass').value;
+    const found = users.find(x => x.username === u && x.password === p);
+    if (!found) { alert('Invalid credentials'); return; }
+    setCurrentUser(found);
+    flash('Logged in as ' + found.username);
+    refreshGallery();
+  });
+}
+
+function showSignup(){
+  document.getElementById('main').innerHTML = `
+    <h2>Signup</h2>
+    <form class="form" id="signupForm">
+      <input id="signupUser" placeholder="Choose a username" required />
+      <input id="signupPass" type="password" placeholder="Choose a password" required />
+      <div style="display:flex;gap:8px">
+        <button class="btn" type="submit">Create account</button>
+        <button class="btn" type="button" onclick="showLogin();">Back to Login</button>
+      </div>
+    </form>
+  `;
+  document.getElementById('signupForm').addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const u = document.getElementById('signupUser').value.trim();
+    const p = document.getElementById('signupPass').value;
+    if (users.some(x=> x.username === u)) { alert('Username taken'); return; }
+    const userObj = { username: u, password: p };
+    users.push(userObj);
+    localStorage.setItem('users', JSON.stringify(users));
+    alert('Account created — please login');
+    showLogin();
+  });
+}
+
+function logout(){
+  setCurrentUser(null);
+  flash('Logged out');
+  showLogin();
+}
+
+/* ---------------------------
+   Startup: migrate old videos (best-effort) & init UI
+   --------------------------- */
+async function startup(){
+  // If localStorage had an old "videos" array with url strings (objectURLs), those objectURLs may not be valid after refresh.
+  // We'll try to migrate metadata but cannot recover blobs from previous object URLs; so we ignore/clear them.
+  // If you have important videos stored only in old localStorage, re-upload them once with this new app.
+  try {
+    const oldVideos = safeJsonParse(localStorage.getItem('videos'), null);
+    if (Array.isArray(oldVideos) && oldVideos.length>0) {
+      // if any entry already has `blob` stored as something serializable, skip. Otherwise ignore to avoid invalid URLs.
+      let needMigrate = oldVideos.some(v => !v.blob && v.url);
+      if (needMigrate) {
+        // don't try to import invalid blob URLs; just drop old localStorage 'videos' to avoid confusion
+        console.warn('Dropping old localStorage videos metadata (objectURLs are not recoverable).');
+        localStorage.removeItem('videos');
+      }
+    }
+  } catch(e){ console.warn('Migration check failed', e); }
+
+  updateNav();
+  if (currentUser) {
+    // show gallery after DB ready
+    await refreshGallery();
+  } else {
+    showLogin();
+  }
+}
+
+startup();
+
+/* make functions globally accessible for onclick handlers */
+window.showGallery = refreshGallery;
+window.showUpload = showUpload;
+window.showLogin = showLogin;
+window.showSignup = showSignup;
+window.showWebcam = showWebcam;
+window.logout = logout;
+window.viewVideo = viewVideo;
+window.deleteVideo = deleteVideo;
+
+</script>
+</body>
+</html>
